@@ -523,28 +523,6 @@ export default function StlSlicerApp() {
       setTimeout(() => setProgress(0), 400);
     }
   };
-      setProgress(40);
-      const result: CutResult = sliceMesh(meshRef.current, point, normal, {
-        pins: pinCount,
-      });
-      setProgress(80);
-
-      // Hide original, show pieces
-      cutsGroupRef.current!.clear();
-      cutsGroupRef.current!.add(result.partA);
-      if (keepBoth) cutsGroupRef.current!.add(result.partB);
-      meshRef.current.visible = false;
-      setCutDone(true);
-      setProgress(100);
-      toast.success("Corte completado");
-    } catch (err) {
-      console.error(err);
-      toast.error("Error durante el corte. Comprueba que el plano corta el modelo.");
-    } finally {
-      setIsProcessing(false);
-      setTimeout(() => setProgress(0), 400);
-    }
-  };
 
   const resetCut = () => {
     cutsGroupRef.current?.clear();
