@@ -2,6 +2,23 @@ import * as THREE from "three";
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg";
 import { STLExporter } from "three-stdlib";
 
+/**
+ * three-bvh-csg requires both brushes to share the same set of BufferAttributes.
+ * STL meshes only have `position` (+ computed `normal`), while BoxGeometry /
+ * CylinderGeometry also include `uv`. Mismatched attributes throw
+ * "Cannot read properties of undefined (reading 'array')" inside GeometryBuilder.
+ * Normalize every geometry we feed to the evaluator to position+normal only.
+ */
+function normalizeForCSG(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
+  // Drop everything except position; recompute normals.
+  for (const name of Object.keys(g.attributes)) {
+    if (name !== "position") g.deleteAttribute(name);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 export type CutResult = {
   partA: THREE.Mesh; // side along +normal
   partB: THREE.Mesh; // side along -normal
@@ -59,12 +76,12 @@ export function sliceMesh(
   // Bake source mesh world transform into geometry copies for CSG
   const bakedGeo = geo.clone();
   bakedGeo.applyMatrix4(sourceMesh.matrixWorld);
-  const sourceBrush = new Brush(bakedGeo);
+  const sourceBrush = new Brush(normalizeForCSG(bakedGeo));
   sourceBrush.updateMatrixWorld();
 
   const cutterBakedGeo = cutterGeo.clone();
   cutterBakedGeo.applyMatrix4(cutter.matrixWorld);
-  const cutterBrush = new Brush(cutterBakedGeo);
+  const cutterBrush = new Brush(normalizeForCSG(cutterBakedGeo));
   cutterBrush.updateMatrixWorld();
 
   const evaluator = new Evaluator();
@@ -77,7 +94,7 @@ export function sliceMesh(
   const cutterGeo2 = new THREE.BoxGeometry(big, big, big);
   cutterGeo2.translate(0, 0, big / 2);
   cutterGeo2.applyMatrix4(cutter.matrixWorld);
-  const cutterBrush2 = new Brush(cutterGeo2);
+  const cutterBrush2 = new Brush(normalizeForCSG(cutterGeo2));
   cutterBrush2.updateMatrixWorld();
   let bBrush = evaluator.evaluate(sourceBrush, cutterBrush2, SUBTRACTION) as Brush;
 
@@ -103,14 +120,14 @@ export function sliceMesh(
       cylGeo.applyMatrix4(cylMat);
 
       // Add pin to partA
-      const pinBrushA = new Brush(cylGeo.clone());
+      const pinBrushA = new Brush(normalizeForCSG(cylGeo));
       pinBrushA.updateMatrixWorld();
       aBrush = evaluator.evaluate(aBrush, pinBrushA, ADDITION) as Brush;
 
       // Subtract socket from partB (slightly larger)
       const socketGeo = new THREE.CylinderGeometry(radius * 1.05, radius * 1.05, height * 1.05, 24);
       socketGeo.applyMatrix4(cylMat);
-      const socketBrush = new Brush(socketGeo);
+      const socketBrush = new Brush(normalizeForCSG(socketGeo));
       socketBrush.updateMatrixWorld();
       bBrush = evaluator.evaluate(bBrush, socketBrush, SUBTRACTION) as Brush;
     }
