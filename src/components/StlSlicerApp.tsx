@@ -392,6 +392,45 @@ export default function StlSlicerApp() {
     ]);
   };
 
+  // --- Model transform helpers ---
+  const rotateModel = (axis: "x" | "y" | "z", deg: number) => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const q = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(axis === "x" ? 1 : 0, axis === "y" ? 1 : 0, axis === "z" ? 1 : 0),
+      THREE.MathUtils.degToRad(deg)
+    );
+    m.quaternion.premultiply(q);
+    m.updateMatrixWorld(true);
+  };
+
+  const resetModelTransform = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    m.position.set(0, 0, 0);
+    m.rotation.set(0, 0, 0);
+    m.scale.set(1, 1, 1);
+    m.updateMatrixWorld(true);
+  };
+
+  const centerModel = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const bb = new THREE.Box3().setFromObject(m);
+    const c = bb.getCenter(new THREE.Vector3());
+    m.position.sub(c);
+    m.updateMatrixWorld(true);
+  };
+
+  const dropToFloor = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    m.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(m);
+    m.position.y -= bb.min.y;
+    m.updateMatrixWorld(true);
+  };
+
   // --- Snapshot for undo ---
   const pushSnapshot = () => {
     if (!meshRef.current) return;
