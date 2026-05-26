@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
-// @ts-expect-error - three-stdlib types
 import { OrbitControls, TransformControls, STLLoader } from "three-stdlib";
 import {
   Upload, Download, RotateCcw, RotateCw, Move, RotateCw as RotateIcon,
@@ -139,10 +138,10 @@ export default function StlSlicerApp() {
     const transform = new TransformControls(camera, renderer.domElement);
     transform.attach(planeGroup);
     transform.setSize(0.9);
-    transform.addEventListener("dragging-changed", (e: any) => {
+    (transform as any).addEventListener("dragging-changed", (e: any) => {
       orbit.enabled = !e.value;
     });
-    transform.addEventListener("objectChange", () => {
+    (transform as any).addEventListener("objectChange", () => {
       const p = planeGroup.position;
       const r = planeGroup.rotation;
       setPlanePos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
@@ -152,7 +151,8 @@ export default function StlSlicerApp() {
         +THREE.MathUtils.radToDeg(r.z).toFixed(1),
       ]);
     });
-    scene.add(transform.getHelper ? transform.getHelper() : transform);
+    const helper = (transform as any).getHelper ? (transform as any).getHelper() : transform;
+    scene.add(helper);
     transformRef.current = transform;
 
     // Animate
@@ -197,9 +197,9 @@ export default function StlSlicerApp() {
 
   useEffect(() => {
     if (planeGroupRef.current) planeGroupRef.current.visible = showPlane;
-    if (transformRef.current) transformRef.current.enabled = showPlane;
     if (transformRef.current) {
-      const helper = transformRef.current.getHelper ? transformRef.current.getHelper() : transformRef.current;
+      (transformRef.current as any).enabled = showPlane;
+      const helper = (transformRef.current as any).getHelper ? (transformRef.current as any).getHelper() : transformRef.current;
       helper.visible = showPlane;
     }
   }, [showPlane]);

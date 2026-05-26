@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg";
-// @ts-expect-error - three-stdlib types
 import { STLExporter } from "three-stdlib";
 
 export type CutResult = {
