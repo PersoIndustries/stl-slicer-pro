@@ -2,6 +2,23 @@ import * as THREE from "three";
 import { Brush, Evaluator, SUBTRACTION, ADDITION } from "three-bvh-csg";
 import { STLExporter } from "three-stdlib";
 
+/**
+ * three-bvh-csg requires both brushes to share the same set of BufferAttributes.
+ * STL meshes only have `position` (+ computed `normal`), while BoxGeometry /
+ * CylinderGeometry also include `uv`. Mismatched attributes throw
+ * "Cannot read properties of undefined (reading 'array')" inside GeometryBuilder.
+ * Normalize every geometry we feed to the evaluator to position+normal only.
+ */
+function normalizeForCSG(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
+  // Drop everything except position; recompute normals.
+  for (const name of Object.keys(g.attributes)) {
+    if (name !== "position") g.deleteAttribute(name);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 export type CutResult = {
   partA: THREE.Mesh; // side along +normal
   partB: THREE.Mesh; // side along -normal
