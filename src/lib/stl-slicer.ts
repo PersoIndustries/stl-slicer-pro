@@ -19,6 +19,57 @@ function normalizeForCSG(geo: THREE.BufferGeometry): THREE.BufferGeometry {
   return g;
 }
 
+export class SliceError extends Error {
+  stage: string;
+  details: Record<string, unknown>;
+  cause?: unknown;
+  constructor(stage: string, message: string, details: Record<string, unknown>, cause?: unknown) {
+    super(`[${stage}] ${message}`);
+    this.name = "SliceError";
+    this.stage = stage;
+    this.details = details;
+    this.cause = cause;
+  }
+}
+
+function describeGeometry(geo: THREE.BufferGeometry, label: string) {
+  const pos = geo.getAttribute("position");
+  return {
+    label,
+    indexed: !!geo.index,
+    vertexCount: pos ? pos.count : 0,
+    triangleCount: geo.index ? geo.index.count / 3 : (pos ? pos.count / 3 : 0),
+    attributes: Object.keys(geo.attributes),
+    hasNaN: pos ? Array.from(pos.array as Float32Array).some((v) => !Number.isFinite(v)) : false,
+  };
+}
+
+function safeEvaluate(
+  evaluator: Evaluator,
+  a: Brush,
+  b: Brush,
+  op: number,
+  stage: string,
+  meta: Record<string, unknown>
+): Brush {
+  const opName = op === SUBTRACTION ? "SUBTRACTION" : op === ADDITION ? "ADDITION" : `OP(${op})`;
+  try {
+    const out = evaluator.evaluate(a, b, op) as Brush;
+    if (!out || !out.geometry || !out.geometry.getAttribute("position")) {
+      throw new Error("Evaluator returned empty/invalid geometry");
+    }
+    return out;
+  } catch (e: unknown) {
+    const err = e as Error;
+    throw new SliceError(
+      stage,
+      `${opName} failed: ${err?.message ?? String(e)}`,
+      { operation: opName, ...meta },
+      e
+    );
+  }
+}
+
 export type CutResult = {
   partA: THREE.Mesh; // side along +normal
   partB: THREE.Mesh; // side along -normal
