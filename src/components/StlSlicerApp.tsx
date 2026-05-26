@@ -789,6 +789,48 @@ export default function StlSlicerApp() {
               </div>
             </TabsContent>
 
+            <TabsContent value="model" className="space-y-3 mt-4">
+              <p className="text-xs text-muted-foreground">
+                Rota o reposiciona el modelo. Usa "Gizmo aplicado a → Modelo" en el panel izquierdo
+                para manipularlo en 3D, o usa las acciones rápidas.
+              </p>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 90°</Label>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 90)} disabled={!hasModel}>+X 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 90)} disabled={!hasModel}>+Y 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 90)} disabled={!hasModel}>+Z 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", -90)} disabled={!hasModel}>−X 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", -90)} disabled={!hasModel}>−Y 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", -90)} disabled={!hasModel}>−Z 90°</Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 180°</Label>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 180)} disabled={!hasModel}>Volcar X</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 180)} disabled={!hasModel}>Volcar Y</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 180)} disabled={!hasModel}>Volcar Z</Button>
+                </div>
+              </div>
+              <Separator />
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Acciones rápidas</Label>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={centerModel} disabled={!hasModel}>
+                    <Crosshair className="h-4 w-4 mr-1" /> Centrar
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={dropToFloor} disabled={!hasModel}>
+                    Apoyar al suelo
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={resetModelTransform} disabled={!hasModel} className="col-span-2">
+                    <RotateCcw className="h-4 w-4 mr-1" /> Resetear rotación/posición
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+
+
             <TabsContent value="cut" className="space-y-4 mt-4">
               <div className="flex items-center justify-between">
                 <div>
