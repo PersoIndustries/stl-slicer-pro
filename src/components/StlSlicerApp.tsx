@@ -690,6 +690,78 @@ export default function StlSlicerApp() {
               Rueda: zoom · Click derecho: pan · Click izq: rotar · Arrastra el gizmo del plano
             </div>
           )}
+
+          {/* Error details panel */}
+          {errorDetails && (
+            <div className="absolute top-3 right-3 max-w-md w-[26rem] bg-card/95 backdrop-blur border border-destructive/60 rounded-lg shadow-xl text-xs">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-destructive/10 rounded-t-lg">
+                <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+                <span className="font-semibold text-destructive">Detalles del error</span>
+                <span className="text-muted-foreground ml-1">{errorDetails.when}</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setErrorExpanded((v) => !v)}>
+                    {errorExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    title="Copiar al portapapeles"
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(errorDetails, null, 2));
+                      toast.success("Detalles copiados");
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setErrorDetails(null)}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              {errorExpanded && (
+                <div className="p-3 space-y-2 max-h-[60vh] overflow-y-auto">
+                  <div>
+                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Mensaje</div>
+                    <div className="font-mono text-foreground break-words">{errorDetails.message}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Etapa</div>
+                      <div className="font-mono">{errorDetails.stage || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Operación CSG</div>
+                      <div className="font-mono">{errorDetails.operation || "—"}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Geometría del modelo</div>
+                    <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
+{JSON.stringify(errorDetails.geometry, null, 2)}
+                    </pre>
+                  </div>
+                  {errorDetails.raw && (
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Contexto de la operación</div>
+                      <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
+{JSON.stringify(errorDetails.raw, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {errorDetails.stack && (
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Stack</div>
+                      <pre className="font-mono text-[10px] bg-muted/40 rounded p-2 overflow-x-auto whitespace-pre-wrap">{errorDetails.stack}</pre>
+                    </div>
+                  )}
+                  <p className="text-muted-foreground text-[11px] pt-1">
+                    Pistas: si la etapa es <code>slice:partA/B</code>, el plano puede no estar atravesando el modelo o la malla tiene huecos. Prueba "Reparar malla" o reposiciona el plano.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </main>
 
         {/* Right panel */}
