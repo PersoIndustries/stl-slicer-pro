@@ -138,16 +138,22 @@ export function sliceMesh(
   const evaluator = new Evaluator();
   evaluator.useGroups = false;
 
-  // SUBTRACT cutter → keeps the side opposite to cutter (the +normal side)
-  let aBrush = evaluator.evaluate(sourceBrush, cutterBrush, SUBTRACTION) as Brush;
+  const sourceDesc = describeGeometry(sourceBrush.geometry, "source");
+  const cutterDesc = describeGeometry(cutterBrush.geometry, "cutter(+)");
 
-  // INVERT cutter for second piece: same box flipped (occupy +Z side)
+  let aBrush = safeEvaluate(evaluator, sourceBrush, cutterBrush, SUBTRACTION, "slice:partA", {
+    source: sourceDesc, cutter: cutterDesc,
+  });
+
   const cutterGeo2 = new THREE.BoxGeometry(big, big, big);
   cutterGeo2.translate(0, 0, big / 2);
   cutterGeo2.applyMatrix4(cutter.matrixWorld);
   const cutterBrush2 = new Brush(normalizeForCSG(cutterGeo2));
   cutterBrush2.updateMatrixWorld();
-  let bBrush = evaluator.evaluate(sourceBrush, cutterBrush2, SUBTRACTION) as Brush;
+  const cutter2Desc = describeGeometry(cutterBrush2.geometry, "cutter(-)");
+  let bBrush = safeEvaluate(evaluator, sourceBrush, cutterBrush2, SUBTRACTION, "slice:partB", {
+    source: sourceDesc, cutter: cutter2Desc,
+  });
 
   // Optional pins/dovels
   const pins = opts.pins ?? 0;
