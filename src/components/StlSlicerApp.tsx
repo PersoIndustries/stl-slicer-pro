@@ -49,6 +49,17 @@ export default function StlSlicerApp() {
   const [planePos, setPlanePos] = useState<[number, number, number]>([0, 0, 0]);
   const [planeRot, setPlaneRot] = useState<[number, number, number]>([0, 0, 0]);
   const [cutDone, setCutDone] = useState(false);
+  const [transformTarget, setTransformTarget] = useState<"plane" | "model">("plane");
+  const [errorDetails, setErrorDetails] = useState<null | {
+    message: string;
+    stage?: string;
+    operation?: string;
+    stack?: string;
+    geometry?: Record<string, unknown>;
+    raw?: Record<string, unknown>;
+    when: string;
+  }>(null);
+  const [errorExpanded, setErrorExpanded] = useState(true);
 
   const historyRef = useRef<Snapshot[]>([]);
   const futureRef = useRef<Snapshot[]>([]);
