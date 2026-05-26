@@ -585,6 +585,18 @@ export default function StlSlicerApp() {
           </div>
 
           <div className="space-y-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Gizmo aplicado a</Label>
+            <div className="flex gap-2">
+              <Button size="sm" variant={transformTarget === "plane" ? "default" : "secondary"} onClick={() => setTransformTarget("plane")} className="flex-1">
+                Plano
+              </Button>
+              <Button size="sm" variant={transformTarget === "model" ? "default" : "secondary"} onClick={() => setTransformTarget("model")} className="flex-1" disabled={!hasModel}>
+                Modelo
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">Vista</Label>
             <div className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2"><Box className="h-4 w-4" /> Wireframe</span>
