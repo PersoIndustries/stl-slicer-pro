@@ -473,10 +473,56 @@ export default function StlSlicerApp() {
     if (!meshRef.current) return;
     setIsProcessing(true);
     setProgress(15);
+    setErrorDetails(null);
     pushSnapshot();
     try {
       const { point, normal } = getPlaneWorld();
       await new Promise((r) => setTimeout(r, 30));
+      setProgress(40);
+      const result: CutResult = sliceMesh(meshRef.current, point, normal, {
+        pins: pinCount,
+      });
+      setProgress(80);
+
+      // Hide original, show pieces
+      cutsGroupRef.current!.clear();
+      cutsGroupRef.current!.add(result.partA);
+      if (keepBoth) cutsGroupRef.current!.add(result.partB);
+      meshRef.current.visible = false;
+      setCutDone(true);
+      setProgress(100);
+      toast.success("Corte completado");
+    } catch (err: unknown) {
+      console.error(err);
+      const e = err as Error & { stage?: string; details?: Record<string, unknown> };
+      const isSlice = err instanceof SliceError;
+      const meshGeo = meshRef.current?.geometry;
+      const pos = meshGeo?.getAttribute("position");
+      setErrorDetails({
+        when: new Date().toLocaleTimeString(),
+        message: e?.message ?? String(err),
+        stage: isSlice ? (err as SliceError).stage : "unknown",
+        operation: isSlice
+          ? String(((err as SliceError).details as { operation?: string })?.operation ?? "")
+          : "",
+        stack: e?.stack ?? "",
+        raw: isSlice ? (err as SliceError).details : undefined,
+        geometry: {
+          modelAttributes: meshGeo ? Object.keys(meshGeo.attributes) : [],
+          modelIndexed: !!meshGeo?.index,
+          modelVertices: pos ? pos.count : 0,
+          modelTriangles: meshGeo?.index ? meshGeo.index.count / 3 : (pos ? pos.count / 3 : 0),
+          modelType: meshGeo?.type ?? "BufferGeometry",
+          pinCount,
+        },
+      });
+      setErrorExpanded(true);
+      toast.error("Error durante el corte. Revisa el panel de detalles.");
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setProgress(0), 400);
+    }
+  };
       setProgress(40);
       const result: CutResult = sliceMesh(meshRef.current, point, normal, {
         pins: pinCount,
