@@ -154,6 +154,8 @@ export default function StlSlicerApp() {
       orbit.enabled = !e.value;
     });
     (transform as any).addEventListener("objectChange", () => {
+      const obj = (transform as any).object;
+      if (!obj || obj !== planeGroup) return;
       const p = planeGroup.position;
       const r = planeGroup.rotation;
       setPlanePos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
