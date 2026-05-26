@@ -14,7 +14,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { sliceMesh, exportMeshAsSTL, repairGeometry, type CutResult } from "@/lib/stl-slicer";
+import { sliceMesh, exportMeshAsSTL, repairGeometry, SliceError, type CutResult } from "@/lib/stl-slicer";
+import { AlertTriangle, ChevronDown, ChevronUp, Copy, X } from "lucide-react";
 
 type Snapshot = {
   meshGeo: THREE.BufferGeometry;
