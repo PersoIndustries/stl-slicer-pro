@@ -698,6 +698,7 @@ export default function StlSlicerApp() {
             <TabsList className="w-full">
               <TabsTrigger value="plane" className="flex-1">Plano</TabsTrigger>
               <TabsTrigger value="align" className="flex-1">Alineación</TabsTrigger>
+              <TabsTrigger value="model" className="flex-1">Modelo</TabsTrigger>
               <TabsTrigger value="cut" className="flex-1">Corte</TabsTrigger>
             </TabsList>
 
