@@ -14,7 +14,8 @@ import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { sliceMesh, exportMeshAsSTL, repairGeometry, type CutResult } from "@/lib/stl-slicer";
+import { sliceMesh, exportMeshAsSTL, repairGeometry, SliceError, type CutResult } from "@/lib/stl-slicer";
+import { AlertTriangle, ChevronDown, ChevronUp, Copy, X } from "lucide-react";
 
 type Snapshot = {
   meshGeo: THREE.BufferGeometry;
@@ -48,6 +49,17 @@ export default function StlSlicerApp() {
   const [planePos, setPlanePos] = useState<[number, number, number]>([0, 0, 0]);
   const [planeRot, setPlaneRot] = useState<[number, number, number]>([0, 0, 0]);
   const [cutDone, setCutDone] = useState(false);
+  const [transformTarget, setTransformTarget] = useState<"plane" | "model">("plane");
+  const [errorDetails, setErrorDetails] = useState<null | {
+    message: string;
+    stage?: string;
+    operation?: string;
+    stack?: string;
+    geometry?: Record<string, unknown>;
+    raw?: Record<string, unknown>;
+    when: string;
+  }>(null);
+  const [errorExpanded, setErrorExpanded] = useState(true);
 
   const historyRef = useRef<Snapshot[]>([]);
   const futureRef = useRef<Snapshot[]>([]);
@@ -142,6 +154,8 @@ export default function StlSlicerApp() {
       orbit.enabled = !e.value;
     });
     (transform as any).addEventListener("objectChange", () => {
+      const obj = (transform as any).object;
+      if (!obj || obj !== planeGroup) return;
       const p = planeGroup.position;
       const r = planeGroup.rotation;
       setPlanePos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
@@ -211,6 +225,17 @@ export default function StlSlicerApp() {
   useEffect(() => {
     if (transformRef.current) transformRef.current.setMode(transformMode);
   }, [transformMode]);
+
+  // Switch gizmo target between plane and model
+  useEffect(() => {
+    const t = transformRef.current;
+    if (!t) return;
+    if (transformTarget === "model" && meshRef.current) {
+      t.attach(meshRef.current);
+    } else if (planeGroupRef.current) {
+      t.attach(planeGroupRef.current);
+    }
+  }, [transformTarget, hasModel]);
 
   // --- File loading ---
   const loadStlFile = useCallback(async (file: File) => {
@@ -367,6 +392,45 @@ export default function StlSlicerApp() {
     ]);
   };
 
+  // --- Model transform helpers ---
+  const rotateModel = (axis: "x" | "y" | "z", deg: number) => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const q = new THREE.Quaternion().setFromAxisAngle(
+      new THREE.Vector3(axis === "x" ? 1 : 0, axis === "y" ? 1 : 0, axis === "z" ? 1 : 0),
+      THREE.MathUtils.degToRad(deg)
+    );
+    m.quaternion.premultiply(q);
+    m.updateMatrixWorld(true);
+  };
+
+  const resetModelTransform = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    m.position.set(0, 0, 0);
+    m.rotation.set(0, 0, 0);
+    m.scale.set(1, 1, 1);
+    m.updateMatrixWorld(true);
+  };
+
+  const centerModel = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    const bb = new THREE.Box3().setFromObject(m);
+    const c = bb.getCenter(new THREE.Vector3());
+    m.position.sub(c);
+    m.updateMatrixWorld(true);
+  };
+
+  const dropToFloor = () => {
+    if (!meshRef.current) return;
+    const m = meshRef.current;
+    m.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(m);
+    m.position.y -= bb.min.y;
+    m.updateMatrixWorld(true);
+  };
+
   // --- Snapshot for undo ---
   const pushSnapshot = () => {
     if (!meshRef.current) return;
@@ -409,6 +473,7 @@ export default function StlSlicerApp() {
     if (!meshRef.current) return;
     setIsProcessing(true);
     setProgress(15);
+    setErrorDetails(null);
     pushSnapshot();
     try {
       const { point, normal } = getPlaneWorld();
@@ -427,9 +492,32 @@ export default function StlSlicerApp() {
       setCutDone(true);
       setProgress(100);
       toast.success("Corte completado");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(err);
-      toast.error("Error durante el corte. Comprueba que el plano corta el modelo.");
+      const e = err as Error & { stage?: string; details?: Record<string, unknown> };
+      const isSlice = err instanceof SliceError;
+      const meshGeo = meshRef.current?.geometry;
+      const pos = meshGeo?.getAttribute("position");
+      setErrorDetails({
+        when: new Date().toLocaleTimeString(),
+        message: e?.message ?? String(err),
+        stage: isSlice ? (err as SliceError).stage : "unknown",
+        operation: isSlice
+          ? String(((err as SliceError).details as { operation?: string })?.operation ?? "")
+          : "",
+        stack: e?.stack ?? "",
+        raw: isSlice ? (err as SliceError).details : undefined,
+        geometry: {
+          modelAttributes: meshGeo ? Object.keys(meshGeo.attributes) : [],
+          modelIndexed: !!meshGeo?.index,
+          modelVertices: pos ? pos.count : 0,
+          modelTriangles: meshGeo?.index ? meshGeo.index.count / 3 : (pos ? pos.count / 3 : 0),
+          modelType: meshGeo?.type ?? "BufferGeometry",
+          pinCount,
+        },
+      });
+      setErrorExpanded(true);
+      toast.error("Error durante el corte. Revisa el panel de detalles.");
     } finally {
       setIsProcessing(false);
       setTimeout(() => setProgress(0), 400);
@@ -493,6 +581,18 @@ export default function StlSlicerApp() {
                   <RotateIcon className="h-4 w-4" />
                 </Button>
               </TooltipTrigger><TooltipContent>Rotar (E)</TooltipContent></Tooltip>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Gizmo aplicado a</Label>
+            <div className="flex gap-2">
+              <Button size="sm" variant={transformTarget === "plane" ? "default" : "secondary"} onClick={() => setTransformTarget("plane")} className="flex-1">
+                Plano
+              </Button>
+              <Button size="sm" variant={transformTarget === "model" ? "default" : "secondary"} onClick={() => setTransformTarget("model")} className="flex-1" disabled={!hasModel}>
+                Modelo
+              </Button>
             </div>
           </div>
 
@@ -590,6 +690,78 @@ export default function StlSlicerApp() {
               Rueda: zoom · Click derecho: pan · Click izq: rotar · Arrastra el gizmo del plano
             </div>
           )}
+
+          {/* Error details panel */}
+          {errorDetails && (
+            <div className="absolute top-3 right-3 max-w-md w-[26rem] bg-card/95 backdrop-blur border border-destructive/60 rounded-lg shadow-xl text-xs">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-destructive/10 rounded-t-lg">
+                <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
+                <span className="font-semibold text-destructive">Detalles del error</span>
+                <span className="text-muted-foreground ml-1">{errorDetails.when}</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setErrorExpanded((v) => !v)}>
+                    {errorExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6"
+                    title="Copiar al portapapeles"
+                    onClick={() => {
+                      navigator.clipboard.writeText(JSON.stringify(errorDetails, null, 2));
+                      toast.success("Detalles copiados");
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setErrorDetails(null)}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              {errorExpanded && (
+                <div className="p-3 space-y-2 max-h-[60vh] overflow-y-auto">
+                  <div>
+                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Mensaje</div>
+                    <div className="font-mono text-foreground break-words">{errorDetails.message}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Etapa</div>
+                      <div className="font-mono">{errorDetails.stage || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Operación CSG</div>
+                      <div className="font-mono">{errorDetails.operation || "—"}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Geometría del modelo</div>
+                    <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
+{JSON.stringify(errorDetails.geometry, null, 2)}
+                    </pre>
+                  </div>
+                  {errorDetails.raw && (
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Contexto de la operación</div>
+                      <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
+{JSON.stringify(errorDetails.raw, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  {errorDetails.stack && (
+                    <div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Stack</div>
+                      <pre className="font-mono text-[10px] bg-muted/40 rounded p-2 overflow-x-auto whitespace-pre-wrap">{errorDetails.stack}</pre>
+                    </div>
+                  )}
+                  <p className="text-muted-foreground text-[11px] pt-1">
+                    Pistas: si la etapa es <code>slice:partA/B</code>, el plano puede no estar atravesando el modelo o la malla tiene huecos. Prueba "Reparar malla" o reposiciona el plano.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </main>
 
         {/* Right panel */}
@@ -598,6 +770,7 @@ export default function StlSlicerApp() {
             <TabsList className="w-full">
               <TabsTrigger value="plane" className="flex-1">Plano</TabsTrigger>
               <TabsTrigger value="align" className="flex-1">Alineación</TabsTrigger>
+              <TabsTrigger value="model" className="flex-1">Modelo</TabsTrigger>
               <TabsTrigger value="cut" className="flex-1">Corte</TabsTrigger>
             </TabsList>
 
@@ -687,6 +860,48 @@ export default function StlSlicerApp() {
                 </div>
               </div>
             </TabsContent>
+
+            <TabsContent value="model" className="space-y-3 mt-4">
+              <p className="text-xs text-muted-foreground">
+                Rota o reposiciona el modelo. Usa "Gizmo aplicado a → Modelo" en el panel izquierdo
+                para manipularlo en 3D, o usa las acciones rápidas.
+              </p>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 90°</Label>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 90)} disabled={!hasModel}>+X 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 90)} disabled={!hasModel}>+Y 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 90)} disabled={!hasModel}>+Z 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", -90)} disabled={!hasModel}>−X 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", -90)} disabled={!hasModel}>−Y 90°</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", -90)} disabled={!hasModel}>−Z 90°</Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 180°</Label>
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 180)} disabled={!hasModel}>Volcar X</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 180)} disabled={!hasModel}>Volcar Y</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 180)} disabled={!hasModel}>Volcar Z</Button>
+                </div>
+              </div>
+              <Separator />
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Acciones rápidas</Label>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <Button size="sm" variant="secondary" onClick={centerModel} disabled={!hasModel}>
+                    <Crosshair className="h-4 w-4 mr-1" /> Centrar
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={dropToFloor} disabled={!hasModel}>
+                    Apoyar al suelo
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={resetModelTransform} disabled={!hasModel} className="col-span-2">
+                    <RotateCcw className="h-4 w-4 mr-1" /> Resetear rotación/posición
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+
 
             <TabsContent value="cut" className="space-y-4 mt-4">
               <div className="flex items-center justify-between">

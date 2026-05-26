@@ -19,6 +19,57 @@ function normalizeForCSG(geo: THREE.BufferGeometry): THREE.BufferGeometry {
   return g;
 }
 
+export class SliceError extends Error {
+  stage: string;
+  details: Record<string, unknown>;
+  cause?: unknown;
+  constructor(stage: string, message: string, details: Record<string, unknown>, cause?: unknown) {
+    super(`[${stage}] ${message}`);
+    this.name = "SliceError";
+    this.stage = stage;
+    this.details = details;
+    this.cause = cause;
+  }
+}
+
+function describeGeometry(geo: THREE.BufferGeometry, label: string) {
+  const pos = geo.getAttribute("position");
+  return {
+    label,
+    indexed: !!geo.index,
+    vertexCount: pos ? pos.count : 0,
+    triangleCount: geo.index ? geo.index.count / 3 : (pos ? pos.count / 3 : 0),
+    attributes: Object.keys(geo.attributes),
+    hasNaN: pos ? Array.from(pos.array as Float32Array).some((v) => !Number.isFinite(v)) : false,
+  };
+}
+
+function safeEvaluate(
+  evaluator: Evaluator,
+  a: Brush,
+  b: Brush,
+  op: number,
+  stage: string,
+  meta: Record<string, unknown>
+): Brush {
+  const opName = op === SUBTRACTION ? "SUBTRACTION" : op === ADDITION ? "ADDITION" : `OP(${op})`;
+  try {
+    const out = evaluator.evaluate(a, b, op) as Brush;
+    if (!out || !out.geometry || !out.geometry.getAttribute("position")) {
+      throw new Error("Evaluator returned empty/invalid geometry");
+    }
+    return out;
+  } catch (e: unknown) {
+    const err = e as Error;
+    throw new SliceError(
+      stage,
+      `${opName} failed: ${err?.message ?? String(e)}`,
+      { operation: opName, ...meta },
+      e
+    );
+  }
+}
+
 export type CutResult = {
   partA: THREE.Mesh; // side along +normal
   partB: THREE.Mesh; // side along -normal
@@ -87,16 +138,22 @@ export function sliceMesh(
   const evaluator = new Evaluator();
   evaluator.useGroups = false;
 
-  // SUBTRACT cutter → keeps the side opposite to cutter (the +normal side)
-  let aBrush = evaluator.evaluate(sourceBrush, cutterBrush, SUBTRACTION) as Brush;
+  const sourceDesc = describeGeometry(sourceBrush.geometry, "source");
+  const cutterDesc = describeGeometry(cutterBrush.geometry, "cutter(+)");
 
-  // INVERT cutter for second piece: same box flipped (occupy +Z side)
+  let aBrush = safeEvaluate(evaluator, sourceBrush, cutterBrush, SUBTRACTION, "slice:partA", {
+    source: sourceDesc, cutter: cutterDesc,
+  });
+
   const cutterGeo2 = new THREE.BoxGeometry(big, big, big);
   cutterGeo2.translate(0, 0, big / 2);
   cutterGeo2.applyMatrix4(cutter.matrixWorld);
   const cutterBrush2 = new Brush(normalizeForCSG(cutterGeo2));
   cutterBrush2.updateMatrixWorld();
-  let bBrush = evaluator.evaluate(sourceBrush, cutterBrush2, SUBTRACTION) as Brush;
+  const cutter2Desc = describeGeometry(cutterBrush2.geometry, "cutter(-)");
+  let bBrush = safeEvaluate(evaluator, sourceBrush, cutterBrush2, SUBTRACTION, "slice:partB", {
+    source: sourceDesc, cutter: cutter2Desc,
+  });
 
   // Optional pins/dovels
   const pins = opts.pins ?? 0;
@@ -122,14 +179,20 @@ export function sliceMesh(
       // Add pin to partA
       const pinBrushA = new Brush(normalizeForCSG(cylGeo));
       pinBrushA.updateMatrixWorld();
-      aBrush = evaluator.evaluate(aBrush, pinBrushA, ADDITION) as Brush;
+      aBrush = safeEvaluate(evaluator, aBrush, pinBrushA, ADDITION, `pin:add#${i}`, {
+        pinIndex: i,
+        pin: describeGeometry(pinBrushA.geometry, "pin"),
+      });
 
       // Subtract socket from partB (slightly larger)
       const socketGeo = new THREE.CylinderGeometry(radius * 1.05, radius * 1.05, height * 1.05, 24);
       socketGeo.applyMatrix4(cylMat);
       const socketBrush = new Brush(normalizeForCSG(socketGeo));
       socketBrush.updateMatrixWorld();
-      bBrush = evaluator.evaluate(bBrush, socketBrush, SUBTRACTION) as Brush;
+      bBrush = safeEvaluate(evaluator, bBrush, socketBrush, SUBTRACTION, `pin:socket#${i}`, {
+        pinIndex: i,
+        socket: describeGeometry(socketBrush.geometry, "socket"),
+      });
     }
   }
 
