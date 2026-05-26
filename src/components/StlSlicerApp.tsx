@@ -224,6 +224,17 @@ export default function StlSlicerApp() {
     if (transformRef.current) transformRef.current.setMode(transformMode);
   }, [transformMode]);
 
+  // Switch gizmo target between plane and model
+  useEffect(() => {
+    const t = transformRef.current;
+    if (!t) return;
+    if (transformTarget === "model" && meshRef.current) {
+      t.attach(meshRef.current);
+    } else if (planeGroupRef.current) {
+      t.attach(planeGroupRef.current);
+    }
+  }, [transformTarget, hasModel]);
+
   // --- File loading ---
   const loadStlFile = useCallback(async (file: File) => {
     setIsProcessing(true);
