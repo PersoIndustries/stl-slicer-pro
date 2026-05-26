@@ -76,12 +76,12 @@ export function sliceMesh(
   // Bake source mesh world transform into geometry copies for CSG
   const bakedGeo = geo.clone();
   bakedGeo.applyMatrix4(sourceMesh.matrixWorld);
-  const sourceBrush = new Brush(bakedGeo);
+  const sourceBrush = new Brush(normalizeForCSG(bakedGeo));
   sourceBrush.updateMatrixWorld();
 
   const cutterBakedGeo = cutterGeo.clone();
   cutterBakedGeo.applyMatrix4(cutter.matrixWorld);
-  const cutterBrush = new Brush(cutterBakedGeo);
+  const cutterBrush = new Brush(normalizeForCSG(cutterBakedGeo));
   cutterBrush.updateMatrixWorld();
 
   const evaluator = new Evaluator();
@@ -94,7 +94,7 @@ export function sliceMesh(
   const cutterGeo2 = new THREE.BoxGeometry(big, big, big);
   cutterGeo2.translate(0, 0, big / 2);
   cutterGeo2.applyMatrix4(cutter.matrixWorld);
-  const cutterBrush2 = new Brush(cutterGeo2);
+  const cutterBrush2 = new Brush(normalizeForCSG(cutterGeo2));
   cutterBrush2.updateMatrixWorld();
   let bBrush = evaluator.evaluate(sourceBrush, cutterBrush2, SUBTRACTION) as Brush;
 
