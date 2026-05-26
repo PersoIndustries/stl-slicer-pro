@@ -179,14 +179,20 @@ export function sliceMesh(
       // Add pin to partA
       const pinBrushA = new Brush(normalizeForCSG(cylGeo));
       pinBrushA.updateMatrixWorld();
-      aBrush = evaluator.evaluate(aBrush, pinBrushA, ADDITION) as Brush;
+      aBrush = safeEvaluate(evaluator, aBrush, pinBrushA, ADDITION, `pin:add#${i}`, {
+        pinIndex: i,
+        pin: describeGeometry(pinBrushA.geometry, "pin"),
+      });
 
       // Subtract socket from partB (slightly larger)
       const socketGeo = new THREE.CylinderGeometry(radius * 1.05, radius * 1.05, height * 1.05, 24);
       socketGeo.applyMatrix4(cylMat);
       const socketBrush = new Brush(normalizeForCSG(socketGeo));
       socketBrush.updateMatrixWorld();
-      bBrush = evaluator.evaluate(bBrush, socketBrush, SUBTRACTION) as Brush;
+      bBrush = safeEvaluate(evaluator, bBrush, socketBrush, SUBTRACTION, `pin:socket#${i}`, {
+        pinIndex: i,
+        socket: describeGeometry(socketBrush.geometry, "socket"),
+      });
     }
   }
 
