@@ -137,6 +137,9 @@ export function sliceMesh(
 
   const evaluator = new Evaluator();
   evaluator.useGroups = false;
+  // three-bvh-csg reads geometry.attributes[name].array for each name in this list.
+  // Default includes 'uv' which our normalized geometries don't have → undefined.array.
+  (evaluator as unknown as { attributes: string[] }).attributes = ["position", "normal"];
 
   const sourceDesc = describeGeometry(sourceBrush.geometry, "source");
   const cutterDesc = describeGeometry(cutterBrush.geometry, "cutter(+)");
