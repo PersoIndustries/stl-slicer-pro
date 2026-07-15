@@ -4,6 +4,8 @@ import { OrbitControls, TransformControls, STLLoader } from "three-stdlib";
 import {
   Upload, Download, RotateCcw, RotateCw, Move, RotateCw as RotateIcon,
   Box, Layers, Wrench, Crosshair, Eye, EyeOff, Scissors, Loader2, Trash2,
+  Keyboard, Info, ChevronDown, ChevronUp, Copy, X, AlertTriangle,
+  ArrowDownToLine, MousePointer2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -15,7 +17,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { sliceMesh, exportMeshAsSTL, repairGeometry, SliceError, type CutResult } from "@/lib/stl-slicer";
-import { AlertTriangle, ChevronDown, ChevronUp, Copy, X } from "lucide-react";
 
 type Snapshot = {
   meshGeo: THREE.BufferGeometry;
@@ -35,8 +36,11 @@ export default function StlSlicerApp() {
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const cutsGroupRef = useRef<THREE.Group | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  // Prevent feedback loop between gizmo drag and numeric inputs.
+  const gizmoDrivenRef = useRef(false);
 
   const [hasModel, setHasModel] = useState(false);
+  const [modelName, setModelName] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -46,6 +50,8 @@ export default function StlSlicerApp() {
   const [transformMode, setTransformMode] = useState<"translate" | "rotate">("translate");
   const [keepBoth, setKeepBoth] = useState(true);
   const [pinCount, setPinCount] = useState(0);
+  const [pinRadius, setPinRadius] = useState(2);
+  const [pinHeight, setPinHeight] = useState(8);
   const [planePos, setPlanePos] = useState<[number, number, number]>([0, 0, 0]);
   const [planeRot, setPlaneRot] = useState<[number, number, number]>([0, 0, 0]);
   const [cutDone, setCutDone] = useState(false);
@@ -60,6 +66,7 @@ export default function StlSlicerApp() {
     when: string;
   }>(null);
   const [errorExpanded, setErrorExpanded] = useState(true);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
   const historyRef = useRef<Snapshot[]>([]);
   const futureRef = useRef<Snapshot[]>([]);
@@ -82,7 +89,6 @@ export default function StlSlicerApp() {
     mount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Lights
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(100, 200, 150);
@@ -91,7 +97,6 @@ export default function StlSlicerApp() {
     dir2.position.set(-100, -50, -100);
     scene.add(dir2);
 
-    // Grid
     const grid = new THREE.GridHelper(400, 40, 0x3a4660, 0x2a3447);
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.5;
@@ -101,7 +106,6 @@ export default function StlSlicerApp() {
     const axes = new THREE.AxesHelper(60);
     scene.add(axes);
 
-    // Plane group (cutting plane visualizer)
     const planeGroup = new THREE.Group();
     const planeGeo = new THREE.PlaneGeometry(100, 100, 10, 10);
     const planeMat = new THREE.MeshBasicMaterial({
@@ -123,7 +127,6 @@ export default function StlSlicerApp() {
     (planeGrid.material as THREE.Material).opacity = 0.5;
     planeGroup.add(planeGrid);
 
-    // Normal arrow
     const arrow = new THREE.ArrowHelper(
       new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0), 30, 0x22d3ee, 8, 4
     );
@@ -132,7 +135,6 @@ export default function StlSlicerApp() {
     scene.add(planeGroup);
     planeGroupRef.current = planeGroup;
 
-    // Preview & cuts groups
     const previewGroup = new THREE.Group();
     scene.add(previewGroup);
     previewGroupRef.current = previewGroup;
@@ -141,7 +143,6 @@ export default function StlSlicerApp() {
     scene.add(cutsGroup);
     cutsGroupRef.current = cutsGroup;
 
-    // Controls
     const orbit = new OrbitControls(camera, renderer.domElement);
     orbit.enableDamping = true;
     orbit.dampingFactor = 0.08;
@@ -152,10 +153,12 @@ export default function StlSlicerApp() {
     transform.setSize(0.9);
     (transform as any).addEventListener("dragging-changed", (e: any) => {
       orbit.enabled = !e.value;
+      gizmoDrivenRef.current = e.value;
     });
     (transform as any).addEventListener("objectChange", () => {
       const obj = (transform as any).object;
       if (!obj || obj !== planeGroup) return;
+      gizmoDrivenRef.current = true;
       const p = planeGroup.position;
       const r = planeGroup.rotation;
       setPlanePos([+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)]);
@@ -169,7 +172,6 @@ export default function StlSlicerApp() {
     scene.add(helper);
     transformRef.current = transform;
 
-    // Animate
     let raf = 0;
     const animate = () => {
       raf = requestAnimationFrame(animate);
@@ -178,7 +180,6 @@ export default function StlSlicerApp() {
     };
     animate();
 
-    // Resize
     const ro = new ResizeObserver(() => {
       const w = mount.clientWidth, h = mount.clientHeight;
       renderer.setSize(w, h);
@@ -195,7 +196,7 @@ export default function StlSlicerApp() {
     };
   }, []);
 
-  // Update wireframe
+  // Wireframe
   useEffect(() => {
     const apply = (m: THREE.Object3D) => {
       m.traverse((o) => {
@@ -209,14 +210,18 @@ export default function StlSlicerApp() {
     if (cutsGroupRef.current) apply(cutsGroupRef.current);
   }, [wireframe, cutDone]);
 
+  // Plane visibility + gizmo enable state
   useEffect(() => {
     if (planeGroupRef.current) planeGroupRef.current.visible = showPlane;
-    if (transformRef.current) {
-      (transformRef.current as any).enabled = showPlane;
-      const helper = (transformRef.current as any).getHelper ? (transformRef.current as any).getHelper() : transformRef.current;
-      helper.visible = showPlane;
+    const t = transformRef.current;
+    if (t) {
+      const targetIsPlane = transformTarget === "plane";
+      const enabled = targetIsPlane ? showPlane : true;
+      (t as any).enabled = enabled;
+      const helper = (t as any).getHelper ? (t as any).getHelper() : t;
+      helper.visible = enabled;
     }
-  }, [showPlane]);
+  }, [showPlane, transformTarget]);
 
   useEffect(() => {
     if (meshRef.current) meshRef.current.visible = showOriginal && !cutDone;
@@ -237,6 +242,32 @@ export default function StlSlicerApp() {
     }
   }, [transformTarget, hasModel]);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "z" || e.key === "Z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+        if (e.key === "y" || e.key === "Y") { e.preventDefault(); redo(); return; }
+      }
+      switch (e.key.toLowerCase()) {
+        case "w": setTransformMode("translate"); break;
+        case "e": setTransformMode("rotate"); break;
+        case "q": setTransformTarget((t) => (t === "plane" ? "model" : "plane")); break;
+        case "p": setShowPlane((v) => !v); break;
+        case "o": setShowOriginal((v) => !v); break;
+        case "enter":
+          if (hasModel && !isProcessing) performCut();
+          break;
+        case "?": setShowShortcuts((v) => !v); break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasModel, isProcessing]);
+
   // --- File loading ---
   const loadStlFile = useCallback(async (file: File) => {
     setIsProcessing(true);
@@ -249,7 +280,6 @@ export default function StlSlicerApp() {
       geo.computeVertexNormals();
       geo.computeBoundingBox();
       geo.center();
-      // Scale model to fit nicely if huge
       const bb = geo.boundingBox!;
       const size = new THREE.Vector3();
       bb.getSize(size);
@@ -263,7 +293,6 @@ export default function StlSlicerApp() {
         }
       }
 
-      // Remove previous
       if (meshRef.current) {
         sceneRef.current!.remove(meshRef.current);
         meshRef.current.geometry.dispose();
@@ -279,9 +308,9 @@ export default function StlSlicerApp() {
       sceneRef.current!.add(mesh);
       meshRef.current = mesh;
       setHasModel(true);
+      setModelName(file.name);
       setCutDone(false);
 
-      // Frame camera
       const bb2 = new THREE.Box3().setFromObject(mesh);
       const center = bb2.getCenter(new THREE.Vector3());
       const sphere = bb2.getBoundingSphere(new THREE.Sphere());
@@ -290,14 +319,19 @@ export default function StlSlicerApp() {
       orbitRef.current.target.copy(center);
       orbitRef.current.update();
 
-      // Reset plane to center, scale visual to model
       const planeGroup = planeGroupRef.current!;
       planeGroup.position.copy(center);
       planeGroup.rotation.set(0, 0, 0);
       const targetSize = sphere.radius * 2.2;
       planeGroup.scale.setScalar(targetSize / 100);
+      gizmoDrivenRef.current = true; // avoid writeback
       setPlanePos([+center.x.toFixed(2), +center.y.toFixed(2), +center.z.toFixed(2)]);
       setPlaneRot([0, 0, 0]);
+
+      // Adjust pin defaults to model size
+      const baseR = Math.max(0.5, Math.min(size.x, size.y, size.z) * 0.02);
+      setPinRadius(+baseR.toFixed(2));
+      setPinHeight(+(baseR * 4).toFixed(2));
 
       setProgress(100);
       toast.success(`Cargado: ${file.name}`);
@@ -320,7 +354,6 @@ export default function StlSlicerApp() {
     else toast.error("Por favor suelta un archivo .stl");
   };
 
-  // --- Plane utility ---
   const getPlaneWorld = () => {
     const g = planeGroupRef.current!;
     g.updateMatrixWorld(true);
@@ -329,7 +362,6 @@ export default function StlSlicerApp() {
     return { point, normal };
   };
 
-  // Update plane from numeric inputs
   const applyPlaneInputs = (
     pos: [number, number, number], rotDeg: [number, number, number]
   ) => {
@@ -342,22 +374,31 @@ export default function StlSlicerApp() {
     );
   };
 
-  // --- Alignment helpers ---
+  const setPlanePosSafe = (v: [number, number, number]) => {
+    gizmoDrivenRef.current = false;
+    setPlanePos(v);
+  };
+  const setPlaneRotSafe = (v: [number, number, number]) => {
+    gizmoDrivenRef.current = false;
+    setPlaneRot(v);
+  };
+
   const centerOnModel = () => {
     if (!meshRef.current) return;
     const bb = new THREE.Box3().setFromObject(meshRef.current);
     const c = bb.getCenter(new THREE.Vector3());
     planeGroupRef.current!.position.copy(c);
+    gizmoDrivenRef.current = true;
     setPlanePos([+c.x.toFixed(2), +c.y.toFixed(2), +c.z.toFixed(2)]);
   };
 
   const alignNormal = (axis: "x" | "y" | "z") => {
     const g = planeGroupRef.current!;
-    // We want plane normal (local +Z) to align with axis
     const target = new THREE.Vector3(axis === "x" ? 1 : 0, axis === "y" ? 1 : 0, axis === "z" ? 1 : 0);
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), target);
     g.quaternion.copy(q);
     const e = new THREE.Euler().setFromQuaternion(q);
+    gizmoDrivenRef.current = true;
     setPlaneRot([
       +THREE.MathUtils.radToDeg(e.x).toFixed(1),
       +THREE.MathUtils.radToDeg(e.y).toFixed(1),
@@ -384,6 +425,7 @@ export default function StlSlicerApp() {
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
     g.quaternion.copy(q);
     const e = new THREE.Euler().setFromQuaternion(q);
+    gizmoDrivenRef.current = true;
     setPlanePos([+pos.x.toFixed(2), +pos.y.toFixed(2), +pos.z.toFixed(2)]);
     setPlaneRot([
       +THREE.MathUtils.radToDeg(e.x).toFixed(1),
@@ -392,7 +434,6 @@ export default function StlSlicerApp() {
     ]);
   };
 
-  // --- Model transform helpers ---
   const rotateModel = (axis: "x" | "y" | "z", deg: number) => {
     if (!meshRef.current) return;
     const m = meshRef.current;
@@ -431,7 +472,6 @@ export default function StlSlicerApp() {
     m.updateMatrixWorld(true);
   };
 
-  // --- Snapshot for undo ---
   const pushSnapshot = () => {
     if (!meshRef.current) return;
     historyRef.current.push({
@@ -453,6 +493,7 @@ export default function StlSlicerApp() {
     meshRef.current.geometry.dispose();
     meshRef.current.geometry = snap.meshGeo;
     cutsGroupRef.current?.clear();
+    meshRef.current.visible = true;
     setCutDone(false);
     toast("Deshecho");
   };
@@ -466,9 +507,12 @@ export default function StlSlicerApp() {
     });
     meshRef.current.geometry.dispose();
     meshRef.current.geometry = snap.meshGeo;
+    cutsGroupRef.current?.clear();
+    meshRef.current.visible = true;
+    setCutDone(false);
+    toast("Rehecho");
   };
 
-  // --- Cut! ---
   const performCut = async () => {
     if (!meshRef.current) return;
     setIsProcessing(true);
@@ -481,10 +525,11 @@ export default function StlSlicerApp() {
       setProgress(40);
       const result: CutResult = sliceMesh(meshRef.current, point, normal, {
         pins: pinCount,
+        pinRadius,
+        pinHeight,
       });
       setProgress(80);
 
-      // Hide original, show pieces
       cutsGroupRef.current!.clear();
       cutsGroupRef.current!.add(result.partA);
       if (keepBoth) cutsGroupRef.current!.add(result.partB);
@@ -545,117 +590,161 @@ export default function StlSlicerApp() {
     if (!meshRef.current) return;
     pushSnapshot();
     meshRef.current.geometry = repairGeometry(meshRef.current.geometry);
-    toast.success("Malla reparada (normales recalculadas)");
+    toast.success("Normales recalculadas");
   };
 
-  // Sync numeric inputs -> plane
-  useEffect(() => { applyPlaneInputs(planePos, planeRot); /* eslint-disable-next-line */ }, [planePos[0], planePos[1], planePos[2], planeRot[0], planeRot[1], planeRot[2]]);
+  // Sync numeric inputs -> plane, but only when the change came from inputs
+  // (not from the gizmo). Prevents feedback loop / rotation drift.
+  useEffect(() => {
+    if (gizmoDrivenRef.current) {
+      gizmoDrivenRef.current = false;
+      return;
+    }
+    applyPlaneInputs(planePos, planeRot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planePos[0], planePos[1], planePos[2], planeRot[0], planeRot[1], planeRot[2]]);
+
+  // Derived: current plane normal for status display
+  const currentNormal = (() => {
+    const g = planeGroupRef.current;
+    if (!g) return null;
+    const n = new THREE.Vector3(0, 0, 1).applyQuaternion(g.quaternion).normalize();
+    return [+n.x.toFixed(2), +n.y.toFixed(2), +n.z.toFixed(2)] as const;
+  })();
 
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
         {/* Left sidebar */}
-        <aside className="w-64 shrink-0 border-r border-sidebar-border bg-sidebar p-4 flex flex-col gap-3 overflow-y-auto">
-          <div className="flex items-center gap-2">
-            <Scissors className="h-5 w-5 text-primary" />
-            <h1 className="text-lg font-semibold">STL Slicer</h1>
-          </div>
-          <p className="text-xs text-muted-foreground">100% en tu navegador. Tus archivos no salen de aquí.</p>
-
-          <Separator />
-
-          <FileUpload onFile={loadStlFile} />
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Modo gizmo</Label>
-            <div className="flex gap-2">
-              <Tooltip><TooltipTrigger asChild>
-                <Button size="sm" variant={transformMode === "translate" ? "default" : "secondary"} onClick={() => setTransformMode("translate")} className="flex-1">
-                  <Move className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger><TooltipContent>Mover (W)</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild>
-                <Button size="sm" variant={transformMode === "rotate" ? "default" : "secondary"} onClick={() => setTransformMode("rotate")} className="flex-1">
-                  <RotateIcon className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger><TooltipContent>Rotar (E)</TooltipContent></Tooltip>
+        <aside className="w-64 shrink-0 border-r border-sidebar-border bg-sidebar flex flex-col overflow-hidden">
+          <div className="p-4 pb-3 space-y-1">
+            <div className="flex items-center gap-2">
+              <Scissors className="h-5 w-5 text-primary" />
+              <h1 className="text-lg font-semibold">STL Slicer</h1>
             </div>
+            <p className="text-xs text-muted-foreground">100% en tu navegador.</p>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Gizmo aplicado a</Label>
-            <div className="flex gap-2">
-              <Button size="sm" variant={transformTarget === "plane" ? "default" : "secondary"} onClick={() => setTransformTarget("plane")} className="flex-1">
-                Plano
-              </Button>
-              <Button size="sm" variant={transformTarget === "model" ? "default" : "secondary"} onClick={() => setTransformTarget("model")} className="flex-1" disabled={!hasModel}>
-                Modelo
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Vista</Label>
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2"><Box className="h-4 w-4" /> Wireframe</span>
-              <Switch checked={wireframe} onCheckedChange={setWireframe} />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2"><Layers className="h-4 w-4" /> Plano</span>
-              <Switch checked={showPlane} onCheckedChange={setShowPlane} />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2">{showOriginal ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} Original</span>
-              <Switch checked={showOriginal} onCheckedChange={setShowOriginal} />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Historial</Label>
-            <div className="flex gap-2">
-              <Button size="sm" variant="secondary" onClick={undo} className="flex-1"><RotateCcw className="h-4 w-4 mr-1" /> Deshacer</Button>
-              <Button size="sm" variant="secondary" onClick={redo} className="flex-1"><RotateCw className="h-4 w-4 mr-1" /> Rehacer</Button>
-            </div>
-            <Button size="sm" variant="secondary" onClick={repair} className="w-full" disabled={!hasModel}>
-              <Wrench className="h-4 w-4 mr-1" /> Reparar malla
-            </Button>
-          </div>
-
-          <Separator />
-
-          <Button
-            onClick={performCut}
-            disabled={!hasModel || isProcessing}
-            className="w-full"
-            size="lg"
-          >
-            {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Scissors className="h-4 w-4 mr-2" />}
-            Cortar
-          </Button>
-
-          {cutDone && (
-            <>
-              <Button onClick={() => downloadPart("A")} variant="secondary" className="w-full">
-                <Download className="h-4 w-4 mr-2" /> Descargar pieza A
-              </Button>
-              {keepBoth && (
-                <Button onClick={() => downloadPart("B")} variant="secondary" className="w-full">
-                  <Download className="h-4 w-4 mr-2" /> Descargar pieza B
-                </Button>
+          <div className="px-4 flex-1 overflow-y-auto space-y-4 pb-4">
+            {/* 1. Archivo */}
+            <section className="space-y-2">
+              <SectionTitle>Archivo</SectionTitle>
+              <FileUpload onFile={loadStlFile} />
+              {modelName && (
+                <p className="text-[11px] text-muted-foreground truncate" title={modelName}>
+                  <span className="text-foreground/80">Actual:</span> {modelName}
+                </p>
               )}
-              <Button onClick={resetCut} variant="ghost" className="w-full">
-                <Trash2 className="h-4 w-4 mr-2" /> Descartar corte
-              </Button>
-            </>
-          )}
+            </section>
+
+            <Separator />
+
+            {/* 2. Gizmo */}
+            <section className="space-y-3">
+              <SectionTitle>Manipulador 3D</SectionTitle>
+
+              <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground">Objetivo</Label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button size="sm" variant={transformTarget === "plane" ? "default" : "secondary"} onClick={() => setTransformTarget("plane")} className="h-8">
+                    <Layers className="h-3.5 w-3.5 mr-1" /> Plano
+                  </Button>
+                  <Button size="sm" variant={transformTarget === "model" ? "default" : "secondary"} onClick={() => setTransformTarget("model")} className="h-8" disabled={!hasModel}>
+                    <Box className="h-3.5 w-3.5 mr-1" /> Modelo
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-[11px] text-muted-foreground">Modo</Label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button size="sm" variant={transformMode === "translate" ? "default" : "secondary"} onClick={() => setTransformMode("translate")} className="h-8">
+                      <Move className="h-3.5 w-3.5 mr-1" /> Mover
+                    </Button>
+                  </TooltipTrigger><TooltipContent>Tecla W</TooltipContent></Tooltip>
+                  <Tooltip><TooltipTrigger asChild>
+                    <Button size="sm" variant={transformMode === "rotate" ? "default" : "secondary"} onClick={() => setTransformMode("rotate")} className="h-8">
+                      <RotateIcon className="h-3.5 w-3.5 mr-1" /> Rotar
+                    </Button>
+                  </TooltipTrigger><TooltipContent>Tecla E</TooltipContent></Tooltip>
+                </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            {/* 3. Vista */}
+            <section className="space-y-2">
+              <SectionTitle>Vista</SectionTitle>
+              <ToggleRow icon={<Box className="h-4 w-4" />} label="Wireframe" checked={wireframe} onChange={setWireframe} />
+              <ToggleRow icon={<Layers className="h-4 w-4" />} label="Plano de corte" checked={showPlane} onChange={setShowPlane} hint="P" />
+              <ToggleRow
+                icon={showOriginal ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                label="Modelo original" checked={showOriginal} onChange={setShowOriginal} hint="O"
+              />
+            </section>
+
+            <Separator />
+
+            {/* 4. Historial / utilidades */}
+            <section className="space-y-2">
+              <SectionTitle>Historial</SectionTitle>
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button size="sm" variant="secondary" onClick={undo} disabled={!hasModel}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" /> Deshacer
+                </Button>
+                <Button size="sm" variant="secondary" onClick={redo} disabled={!hasModel}>
+                  <RotateCw className="h-3.5 w-3.5 mr-1" /> Rehacer
+                </Button>
+              </div>
+              <Tooltip><TooltipTrigger asChild>
+                <Button size="sm" variant="secondary" onClick={repair} className="w-full" disabled={!hasModel}>
+                  <Wrench className="h-3.5 w-3.5 mr-1" /> Recalcular normales
+                </Button>
+              </TooltipTrigger><TooltipContent>Recalcula las normales de la malla para mejorar el sombreado.</TooltipContent></Tooltip>
+            </section>
+          </div>
+
+          {/* Sticky action zone */}
+          <div className="border-t border-sidebar-border p-4 space-y-2 bg-sidebar">
+            <Button
+              onClick={performCut}
+              disabled={!hasModel || isProcessing}
+              className="w-full"
+              size="lg"
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Scissors className="h-4 w-4 mr-2" />}
+              Cortar modelo
+            </Button>
+
+            {cutDone && (
+              <div className="space-y-1.5">
+                <Button onClick={() => downloadPart("A")} variant="secondary" className="w-full" size="sm">
+                  <Download className="h-3.5 w-3.5 mr-1.5" /> Pieza A (.stl)
+                </Button>
+                {keepBoth && (
+                  <Button onClick={() => downloadPart("B")} variant="secondary" className="w-full" size="sm">
+                    <Download className="h-3.5 w-3.5 mr-1.5" /> Pieza B (.stl)
+                  </Button>
+                )}
+                <Button onClick={resetCut} variant="ghost" className="w-full" size="sm">
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Descartar corte
+                </Button>
+              </div>
+            )}
+
+            <button
+              className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 pt-1"
+              onClick={() => setShowShortcuts((v) => !v)}
+            >
+              <Keyboard className="h-3 w-3" /> Atajos de teclado
+            </button>
+          </div>
         </aside>
 
         {/* Canvas */}
-        <main className="flex-1 relative">
+        <main className="flex-1 relative min-w-0">
           <div
             ref={mountRef}
             className="absolute inset-0"
@@ -663,10 +752,9 @@ export default function StlSlicerApp() {
             onDragLeave={() => setDragOver(false)}
             onDrop={onDrop}
           />
+
           {!hasModel && (
-            <div
-              className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-colors ${dragOver ? "bg-primary/10" : ""}`}
-            >
+            <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-colors ${dragOver ? "bg-primary/10" : ""}`}>
               <div className="text-center pointer-events-auto">
                 <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center">
                   <Upload className="h-10 w-10 text-primary" />
@@ -677,23 +765,52 @@ export default function StlSlicerApp() {
             </div>
           )}
 
-          {/* Progress */}
           {progress > 0 && (
-            <div className="absolute top-0 left-0 right-0 h-1 bg-secondary">
+            <div className="absolute top-0 left-0 right-0 h-1 bg-secondary z-10">
               <div className="h-full bg-primary transition-all" style={{ width: `${progress}%` }} />
             </div>
           )}
 
-          {/* Hint */}
+          {/* Status bar (bottom) */}
           {hasModel && (
-            <div className="absolute bottom-3 left-3 text-xs text-muted-foreground bg-card/70 backdrop-blur px-3 py-1.5 rounded-md border border-border">
-              Rueda: zoom · Click derecho: pan · Click izq: rotar · Arrastra el gizmo del plano
+            <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 pointer-events-none">
+              <div className="text-[11px] text-muted-foreground bg-card/80 backdrop-blur px-3 py-1.5 rounded-md border border-border pointer-events-auto flex items-center gap-3 flex-wrap">
+                <span className="flex items-center gap-1"><MousePointer2 className="h-3 w-3" /> Rueda: zoom · Der: pan · Izq: orbitar</span>
+                {currentNormal && (
+                  <span className="font-mono">
+                    Normal: <span className="text-foreground">[{currentNormal.join(", ")}]</span>
+                  </span>
+                )}
+                <span className="capitalize">
+                  Gizmo: <span className="text-foreground">{transformTarget === "plane" ? "plano" : "modelo"} · {transformMode === "translate" ? "mover" : "rotar"}</span>
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Error details panel */}
+          {/* Shortcuts panel */}
+          {showShortcuts && (
+            <div className="absolute top-3 left-3 bg-card/95 backdrop-blur border border-border rounded-lg shadow-xl p-3 text-xs w-64">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-semibold flex items-center gap-1"><Keyboard className="h-3.5 w-3.5" /> Atajos</span>
+                <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setShowShortcuts(false)}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <ul className="space-y-1 font-mono">
+                <li><Kbd>W</Kbd> mover · <Kbd>E</Kbd> rotar</li>
+                <li><Kbd>Q</Kbd> alterna plano ↔ modelo</li>
+                <li><Kbd>P</Kbd> ocultar/mostrar plano</li>
+                <li><Kbd>O</Kbd> ocultar/mostrar original</li>
+                <li><Kbd>Enter</Kbd> cortar</li>
+                <li><Kbd>Ctrl/⌘</Kbd>+<Kbd>Z</Kbd> deshacer · <Kbd>+Shift</Kbd> rehacer</li>
+              </ul>
+            </div>
+          )}
+
+          {/* Error panel */}
           {errorDetails && (
-            <div className="absolute top-3 right-3 max-w-md w-[26rem] bg-card/95 backdrop-blur border border-destructive/60 rounded-lg shadow-xl text-xs">
+            <div className="absolute top-3 right-3 max-w-md w-[26rem] bg-card/95 backdrop-blur border border-destructive/60 rounded-lg shadow-xl text-xs z-20">
               <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-destructive/10 rounded-t-lg">
                 <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
                 <span className="font-semibold text-destructive">Detalles del error</span>
@@ -703,10 +820,7 @@ export default function StlSlicerApp() {
                     {errorExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </Button>
                   <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6"
-                    title="Copiar al portapapeles"
+                    size="icon" variant="ghost" className="h-6 w-6" title="Copiar"
                     onClick={() => {
                       navigator.clipboard.writeText(JSON.stringify(errorDetails, null, 2));
                       toast.success("Detalles copiados");
@@ -731,19 +845,19 @@ export default function StlSlicerApp() {
                       <div className="font-mono">{errorDetails.stage || "—"}</div>
                     </div>
                     <div>
-                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Operación CSG</div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Operación</div>
                       <div className="font-mono">{errorDetails.operation || "—"}</div>
                     </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Geometría del modelo</div>
+                    <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Geometría</div>
                     <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
 {JSON.stringify(errorDetails.geometry, null, 2)}
                     </pre>
                   </div>
                   {errorDetails.raw && (
                     <div>
-                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Contexto de la operación</div>
+                      <div className="text-muted-foreground uppercase tracking-wide text-[10px]">Contexto CSG</div>
                       <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 overflow-x-auto">
 {JSON.stringify(errorDetails.raw, null, 2)}
                       </pre>
@@ -756,7 +870,7 @@ export default function StlSlicerApp() {
                     </div>
                   )}
                   <p className="text-muted-foreground text-[11px] pt-1">
-                    Pistas: si la etapa es <code>slice:partA/B</code>, el plano puede no estar atravesando el modelo o la malla tiene huecos. Prueba "Reparar malla" o reposiciona el plano.
+                    Pistas: si la etapa es <code>slice:partA/B</code>, el plano puede no cruzar el modelo o hay huecos en la malla. Prueba "Recalcular normales" o reposiciona el plano.
                   </p>
                 </div>
               )}
@@ -765,171 +879,234 @@ export default function StlSlicerApp() {
         </main>
 
         {/* Right panel */}
-        <aside className="w-80 shrink-0 border-l border-sidebar-border bg-sidebar p-4 overflow-y-auto">
-          <Tabs defaultValue="plane">
+        <aside className="w-80 shrink-0 border-l border-sidebar-border bg-sidebar overflow-y-auto">
+          <Tabs defaultValue="plane" className="p-4">
             <TabsList className="w-full">
               <TabsTrigger value="plane" className="flex-1">Plano</TabsTrigger>
-              <TabsTrigger value="align" className="flex-1">Alineación</TabsTrigger>
-              <TabsTrigger value="model" className="flex-1">Modelo</TabsTrigger>
+              <TabsTrigger value="model" className="flex-1" disabled={!hasModel}>Modelo</TabsTrigger>
               <TabsTrigger value="cut" className="flex-1">Corte</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="plane" className="space-y-4 mt-4">
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Posición</Label>
-                {(["X", "Y", "Z"] as const).map((axis, i) => (
-                  <div key={axis} className="mt-2">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span>{axis}</span>
-                      <Input
-                        type="number"
-                        value={planePos[i]}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value) || 0;
-                          const np = [...planePos] as [number, number, number];
-                          np[i] = v; setPlanePos(np);
-                        }}
-                        className="h-7 w-24 text-xs"
-                        step="0.5"
-                      />
-                    </div>
-                    <Slider
-                      min={-200} max={200} step={0.5}
-                      value={[planePos[i]]}
-                      onValueChange={([v]) => {
-                        const np = [...planePos] as [number, number, number];
-                        np[i] = v; setPlanePos(np);
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-              <Separator />
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotación (°)</Label>
-                {(["X", "Y", "Z"] as const).map((axis, i) => (
-                  <div key={axis} className="mt-2">
-                    <div className="flex items-center justify-between text-xs mb-1">
-                      <span>{axis}</span>
-                      <Input
-                        type="number"
-                        value={planeRot[i]}
-                        onChange={(e) => {
-                          const v = parseFloat(e.target.value) || 0;
-                          const nr = [...planeRot] as [number, number, number];
-                          nr[i] = v; setPlaneRot(nr);
-                        }}
-                        className="h-7 w-24 text-xs"
-                        step="1"
-                      />
-                    </div>
-                    <Slider
-                      min={-180} max={180} step={1}
-                      value={[planeRot[i]]}
-                      onValueChange={([v]) => {
-                        const nr = [...planeRot] as [number, number, number];
-                        nr[i] = v; setPlaneRot(nr);
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </TabsContent>
-
-            <TabsContent value="align" className="space-y-3 mt-4">
-              <Button onClick={centerOnModel} variant="secondary" className="w-full" disabled={!hasModel}>
-                <Crosshair className="h-4 w-4 mr-2" /> Centrar en el modelo
-              </Button>
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Normal del plano</Label>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  <Button size="sm" variant="secondary" onClick={() => alignNormal("x")}>Eje X</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignNormal("y")}>Eje Y</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignNormal("z")}>Eje Z</Button>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Alinear a cara</Label>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("top")} disabled={!hasModel}>Superior</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("bottom")} disabled={!hasModel}>Inferior</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("front")} disabled={!hasModel}>Frontal</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("back")} disabled={!hasModel}>Trasera</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("left")} disabled={!hasModel}>Izquierda</Button>
-                  <Button size="sm" variant="secondary" onClick={() => alignFace("right")} disabled={!hasModel}>Derecha</Button>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="model" className="space-y-3 mt-4">
-              <p className="text-xs text-muted-foreground">
-                Rota o reposiciona el modelo. Usa "Gizmo aplicado a → Modelo" en el panel izquierdo
-                para manipularlo en 3D, o usa las acciones rápidas.
-              </p>
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 90°</Label>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 90)} disabled={!hasModel}>+X 90°</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 90)} disabled={!hasModel}>+Y 90°</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 90)} disabled={!hasModel}>+Z 90°</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", -90)} disabled={!hasModel}>−X 90°</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", -90)} disabled={!hasModel}>−Y 90°</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", -90)} disabled={!hasModel}>−Z 90°</Button>
-                </div>
-              </div>
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Rotar 180°</Label>
-                <div className="grid grid-cols-3 gap-2 mt-2">
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 180)} disabled={!hasModel}>Volcar X</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 180)} disabled={!hasModel}>Volcar Y</Button>
-                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 180)} disabled={!hasModel}>Volcar Z</Button>
-                </div>
-              </div>
-              <Separator />
-              <div>
-                <Label className="text-xs uppercase tracking-wide text-muted-foreground">Acciones rápidas</Label>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <Button size="sm" variant="secondary" onClick={centerModel} disabled={!hasModel}>
-                    <Crosshair className="h-4 w-4 mr-1" /> Centrar
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={dropToFloor} disabled={!hasModel}>
-                    Apoyar al suelo
-                  </Button>
-                  <Button size="sm" variant="secondary" onClick={resetModelTransform} disabled={!hasModel} className="col-span-2">
-                    <RotateCcw className="h-4 w-4 mr-1" /> Resetear rotación/posición
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-
-
-            <TabsContent value="cut" className="space-y-4 mt-4">
-              <div className="flex items-center justify-between">
+            {/* Plano — merges position/rotation + alignment shortcuts */}
+            <TabsContent value="plane" className="space-y-5 mt-4">
+              <section className="space-y-2">
+                <SectionTitle>Acciones rápidas</SectionTitle>
+                <Button onClick={centerOnModel} variant="secondary" className="w-full" size="sm" disabled={!hasModel}>
+                  <Crosshair className="h-4 w-4 mr-2" /> Centrar en el modelo
+                </Button>
                 <div>
-                  <Label>Mantener ambas piezas</Label>
-                  <p className="text-xs text-muted-foreground">Si está apagado, solo se conserva la pieza A.</p>
+                  <Label className="text-[11px] text-muted-foreground">Alinear normal a eje</Label>
+                  <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                    <Button size="sm" variant="secondary" onClick={() => alignNormal("x")}>X</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignNormal("y")}>Y</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignNormal("z")}>Z</Button>
+                  </div>
                 </div>
-                <Switch checked={keepBoth} onCheckedChange={setKeepBoth} />
-              </div>
-              <Separator />
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <Label>Pines / dovelas</Label>
-                  <span className="text-sm tabular-nums">{pinCount}</span>
+                <div>
+                  <Label className="text-[11px] text-muted-foreground">Alinear a cara del modelo</Label>
+                  <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("top")} disabled={!hasModel}>Sup.</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("bottom")} disabled={!hasModel}>Inf.</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("front")} disabled={!hasModel}>Frontal</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("back")} disabled={!hasModel}>Trasera</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("left")} disabled={!hasModel}>Izq.</Button>
+                    <Button size="sm" variant="secondary" onClick={() => alignFace("right")} disabled={!hasModel}>Der.</Button>
+                  </div>
                 </div>
-                <Slider min={0} max={8} step={1} value={[pinCount]} onValueChange={([v]) => setPinCount(v)} />
-                <p className="text-xs text-muted-foreground mt-1">Se añaden automáticamente alineadas con la cara de corte.</p>
-              </div>
+              </section>
+
               <Separator />
+
+              <section>
+                <SectionTitle>Posición</SectionTitle>
+                {(["X", "Y", "Z"] as const).map((axis, i) => (
+                  <AxisControl
+                    key={axis}
+                    label={axis}
+                    value={planePos[i]}
+                    min={-200} max={200} step={0.5}
+                    onChange={(v) => {
+                      const np = [...planePos] as [number, number, number];
+                      np[i] = v; setPlanePosSafe(np);
+                    }}
+                  />
+                ))}
+              </section>
+
+              <Separator />
+
+              <section>
+                <SectionTitle>Rotación (°)</SectionTitle>
+                {(["X", "Y", "Z"] as const).map((axis, i) => (
+                  <AxisControl
+                    key={axis}
+                    label={axis}
+                    value={planeRot[i]}
+                    min={-180} max={180} step={1}
+                    onChange={(v) => {
+                      const nr = [...planeRot] as [number, number, number];
+                      nr[i] = v; setPlaneRotSafe(nr);
+                    }}
+                  />
+                ))}
+              </section>
+            </TabsContent>
+
+            {/* Modelo */}
+            <TabsContent value="model" className="space-y-4 mt-4">
               <p className="text-xs text-muted-foreground">
-                El corte se realiza con CSG y cierra la cara automáticamente para que la pieza sea
-                imprimible (watertight). Las piezas grandes pueden tardar varios segundos.
+                Rota el modelo antes de cortar. También puedes usar el gizmo (<Kbd>Q</Kbd> para alternar a modelo).
+              </p>
+              <section>
+                <SectionTitle>Rotar 90°</SectionTitle>
+                <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 90)}>+X</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 90)}>+Y</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 90)}>+Z</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", -90)}>−X</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", -90)}>−Y</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", -90)}>−Z</Button>
+                </div>
+              </section>
+              <section>
+                <SectionTitle>Volcar 180°</SectionTitle>
+                <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("x", 180)}>Eje X</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("y", 180)}>Eje Y</Button>
+                  <Button size="sm" variant="secondary" onClick={() => rotateModel("z", 180)}>Eje Z</Button>
+                </div>
+              </section>
+              <Separator />
+              <section>
+                <SectionTitle>Posicionar</SectionTitle>
+                <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                  <Button size="sm" variant="secondary" onClick={centerModel}>
+                    <Crosshair className="h-3.5 w-3.5 mr-1" /> Centrar
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={dropToFloor}>
+                    <ArrowDownToLine className="h-3.5 w-3.5 mr-1" /> Al suelo
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={resetModelTransform} className="col-span-2">
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" /> Resetear transformación
+                  </Button>
+                </div>
+              </section>
+            </TabsContent>
+
+            {/* Corte */}
+            <TabsContent value="cut" className="space-y-4 mt-4">
+              <section>
+                <SectionTitle>Piezas</SectionTitle>
+                <div className="flex items-center justify-between mt-1">
+                  <div>
+                    <Label className="text-sm">Mantener ambas</Label>
+                    <p className="text-[11px] text-muted-foreground">Si está apagado, solo pieza A.</p>
+                  </div>
+                  <Switch checked={keepBoth} onCheckedChange={setKeepBoth} />
+                </div>
+              </section>
+
+              <Separator />
+
+              <section className="space-y-3">
+                <SectionTitle>Pines / dovelas</SectionTitle>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs">Cantidad</Label>
+                    <span className="text-sm tabular-nums">{pinCount}</span>
+                  </div>
+                  <Slider min={0} max={8} step={1} value={[pinCount]} onValueChange={([v]) => setPinCount(v)} />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs">Radio</Label>
+                    <Input
+                      type="number" value={pinRadius} step={0.1} min={0.1}
+                      onChange={(e) => setPinRadius(Math.max(0.1, parseFloat(e.target.value) || 0.1))}
+                      className="h-7 w-20 text-xs"
+                    />
+                  </div>
+                  <Slider min={0.1} max={20} step={0.1} value={[pinRadius]} onValueChange={([v]) => setPinRadius(v)} />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs">Altura</Label>
+                    <Input
+                      type="number" value={pinHeight} step={0.5} min={0.5}
+                      onChange={(e) => setPinHeight(Math.max(0.5, parseFloat(e.target.value) || 0.5))}
+                      className="h-7 w-20 text-xs"
+                    />
+                  </div>
+                  <Slider min={0.5} max={50} step={0.5} value={[pinHeight]} onValueChange={([v]) => setPinHeight(v)} />
+                </div>
+                <p className="text-[11px] text-muted-foreground">Los pines se distribuyen en anillo sobre la cara del corte.</p>
+              </section>
+
+              <Separator />
+
+              <p className="text-[11px] text-muted-foreground flex gap-1.5">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                El corte usa CSG y cierra la cara automáticamente para que la pieza sea imprimible. Modelos grandes tardan varios segundos.
               </p>
             </TabsContent>
           </Tabs>
         </aside>
       </div>
     </TooltipProvider>
+  );
+}
+
+// -------- Small helpers --------
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <Label className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">{children}</Label>;
+}
+
+function ToggleRow({
+  icon, label, checked, onChange, hint,
+}: {
+  icon: React.ReactNode; label: string; checked: boolean;
+  onChange: (v: boolean) => void; hint?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="flex items-center gap-2 min-w-0">{icon}<span className="truncate">{label}</span></span>
+      <div className="flex items-center gap-2 shrink-0">
+        {hint && <Kbd className="opacity-60">{hint}</Kbd>}
+        <Switch checked={checked} onCheckedChange={onChange} />
+      </div>
+    </div>
+  );
+}
+
+function AxisControl({
+  label, value, min, max, step, onChange,
+}: {
+  label: string; value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="mt-2">
+      <div className="flex items-center justify-between text-xs mb-1">
+        <span className="font-mono w-4">{label}</span>
+        <Input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          className="h-7 w-24 text-xs"
+          step={step}
+        />
+      </div>
+      <Slider min={min} max={max} step={step} value={[value]} onValueChange={([v]) => onChange(v)} />
+    </div>
+  );
+}
+
+function Kbd({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <kbd className={`inline-flex items-center rounded border border-border bg-muted px-1 text-[10px] font-mono ${className}`}>
+      {children}
+    </kbd>
   );
 }
 
@@ -946,7 +1123,7 @@ function FileUpload({ onFile }: { onFile: (f: File) => void }) {
           e.target.value = "";
         }}
       />
-      <Button onClick={() => inputRef.current?.click()} className="w-full" size="lg">
+      <Button onClick={() => inputRef.current?.click()} className="w-full" size="sm">
         <Upload className="h-4 w-4 mr-2" /> Subir STL
       </Button>
     </>
