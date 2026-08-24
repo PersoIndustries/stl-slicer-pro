@@ -5,7 +5,7 @@ import {
   Upload, Download, RotateCcw, RotateCw, Move, RotateCw as RotateIcon,
   Box, Layers, Wrench, Crosshair, Eye, EyeOff, Scissors, Loader2, Trash2,
   Keyboard, Info, ChevronDown, ChevronUp, Copy, X, AlertTriangle,
-  ArrowDownToLine, MousePointer2,
+  ArrowDownToLine, MousePointer2, Rocket,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { sliceMesh, exportMeshAsSTL, repairGeometry, SliceError, type CutResult } from "@/lib/stl-slicer";
+import DeployPanel from "@/components/DeployPanel";
 
 type Snapshot = {
   meshGeo: THREE.BufferGeometry;
@@ -885,6 +886,7 @@ export default function StlSlicerApp() {
               <TabsTrigger value="plane" className="flex-1">Plano</TabsTrigger>
               <TabsTrigger value="model" className="flex-1" disabled={!hasModel}>Modelo</TabsTrigger>
               <TabsTrigger value="cut" className="flex-1">Corte</TabsTrigger>
+              <TabsTrigger value="deploy" className="flex-1"><Rocket className="h-3.5 w-3.5 mr-1" />Deploy</TabsTrigger>
             </TabsList>
 
             {/* Plano — merges position/rotation + alignment shortcuts */}
@@ -1048,6 +1050,11 @@ export default function StlSlicerApp() {
                 <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                 El corte usa CSG y cierra la cara automáticamente para que la pieza sea imprimible. Modelos grandes tardan varios segundos.
               </p>
+            </TabsContent>
+
+            {/* Deploy */}
+            <TabsContent value="deploy">
+              <DeployPanel />
             </TabsContent>
           </Tabs>
         </aside>
