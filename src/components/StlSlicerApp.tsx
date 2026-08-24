@@ -1051,6 +1051,10 @@ export default function StlSlicerApp() {
                 El corte usa CSG y cierra la cara automáticamente para que la pieza sea imprimible. Modelos grandes tardan varios segundos.
               </p>
             </TabsContent>
+
+            {/* Deploy */}
+            <TabsContent value="deploy">
+              <DeployPanel />
           </Tabs>
         </aside>
       </div>
