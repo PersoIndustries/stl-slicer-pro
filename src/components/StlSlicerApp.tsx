@@ -1055,6 +1055,7 @@ export default function StlSlicerApp() {
             {/* Deploy */}
             <TabsContent value="deploy">
               <DeployPanel />
+            </TabsContent>
           </Tabs>
         </aside>
       </div>
