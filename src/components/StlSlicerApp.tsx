@@ -886,6 +886,7 @@ export default function StlSlicerApp() {
               <TabsTrigger value="plane" className="flex-1">Plano</TabsTrigger>
               <TabsTrigger value="model" className="flex-1" disabled={!hasModel}>Modelo</TabsTrigger>
               <TabsTrigger value="cut" className="flex-1">Corte</TabsTrigger>
+              <TabsTrigger value="deploy" className="flex-1"><Rocket className="h-3.5 w-3.5 mr-1" />Deploy</TabsTrigger>
             </TabsList>
 
             {/* Plano — merges position/rotation + alignment shortcuts */}
